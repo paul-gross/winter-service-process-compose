@@ -1,0 +1,19 @@
+name = "winter-service-process-compose"
+prefix = "wsp"
+
+# Service orchestration is in scope only while a session is bringing services up,
+# reading their logs, or developing this provider — so the entry point is a link
+# an agent follows then, not context injected into every session.
+description = "process-compose service orchestration — read when setting up, operating, or developing the process-compose service provider."
+load = "lazy"
+
+doctor = "workflow/doctor.sh"
+
+[provides]
+service = "workflow/service"
+
+[implements]
+service = "v1"
+
+[hooks]
+on_env_destroy = "./hooks/destroy-worktree.sh"

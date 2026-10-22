@@ -1,0 +1,36 @@
+# Declarative manifest for winter-service-process-compose.
+# Copy to workspace:/.winter/config/winter-service-process-compose/config.toml and customize.
+#
+# The schema is the winter-service-tmux [[service]] vocabulary, so an entry can move between the two providers
+# unchanged. Where this provider differs is called out per key.
+
+[[service]]
+name = "api"                 # required; unique across both scopes
+scope = "project"            # "project" (default: one per feature env) or "workspace"
+cmd = "cd app && uv run python -m app"  # required and non-empty; `command` is a deprecated alias
+cwd = "app"                  # optional; relative to the scope root, must stay inside it
+port = "WINTER_PORT_BASE + 1" # optional; literal or WINTER_PORT_BASE + <offset>
+depends_on = ["db-init"]     # optional; same-scope names only — cross-scope references are refused
+
+# Accepted and ignored here (tmux-only): target, log.
+
+[service.env]                # optional extra environment for this service
+FOO = "bar"
+
+[service.health]
+type = "url"                 # "url" or "cmd"; "log" and "uptime" are refused
+target = "http://localhost:${WTS_API_PORT}/api/health"
+timeout = 5                  # seconds, optional
+
+[service.startup]            # tmux-compatible retry policy; maps to on_failure when [service.restart] is absent
+retries = 2
+retry_delay = 2.0
+
+[service.restart]            # native to this provider; tmux ignores it
+policy = "on_failure"        # "no", "on_failure", or "always"
+backoff_seconds = 2
+max_restarts = 5
+
+[[service]]
+name = "db-init"
+cmd = "true"
