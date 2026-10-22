@@ -17,4 +17,5 @@ full application stack side by side.
 ## 🚀 Setup
 
 Install `process-compose` (1.122.0 or newer), copy [workflow/config.toml.example](./workflow/config.toml.example) to
-`.winter/config/winter-service-process-compose/config.toml`, and bind the provider in `[capabilities]`.
+`.winter/config/winter-service-process-compose/config.toml`, and bind the provider in `[capabilities]`. See the
+[context hub](./context/index.md) for the schema and behavior.

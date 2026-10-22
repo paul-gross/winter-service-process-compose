@@ -5,5 +5,5 @@ headless process-compose daemon per scope — each feature environment, plus the
 side by side without sharing sockets, ports, or process state. It reads the same `[[service]]` manifest the tmux
 provider reads, so an entry moves between the two providers unchanged; the one addition is `[service.restart]`.
 
-The manifest schema, with the keys this provider honors, ignores, and refuses, is annotated in
-[workflow/config.toml.example](./workflow/config.toml.example).
+Read [context/index.md](./context/index.md) when setting up, operating, or developing this provider — the hub for the
+setup steps, manifest schema, status and log behavior, and dev loop.
