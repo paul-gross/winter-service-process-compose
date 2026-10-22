@@ -28,7 +28,8 @@ class ProcSessionReaper:
                 continue
             args = [a.decode(errors="replace") for a in argv]
             if needle in args and args and Path(args[0]).name == "process-compose":
-                return self._sid(pid)
+                sid = self._sid(pid)
+                return sid if sid == pid else None
         return None
 
     def pid_alive(self, pid: int) -> bool:

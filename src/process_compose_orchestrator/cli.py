@@ -97,6 +97,15 @@ def _single_scope_pattern(action: str, args: list[str]) -> ScopePattern:
     return pattern
 
 
+def _parse_timeout(raw: str | None) -> float | None:
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise ProcessComposeError(f"WINTER_SERVICE_TIMEOUT must be a number of seconds, got '{raw}'") from None
+
+
 def _cmd_up(container: Container, args: list[str]) -> int:
     pattern = _single_scope_pattern("up", args)
     scope = Scope.of(_require_workspace_dir(), pattern.scope)
@@ -107,7 +116,7 @@ def _cmd_up(container: Container, args: list[str]) -> int:
         _scope_services(scope, manifest),
         pattern,
         os.environ,
-        float(raw_timeout) if raw_timeout else None,
+        _parse_timeout(raw_timeout),
     )
     return 0
 
