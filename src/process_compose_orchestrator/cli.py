@@ -3,7 +3,7 @@
 Winter invokes this as ``<entrypoint> <action> [positional...]`` with cwd at the workspace root and ``WINTER_*``
 env vars set.
 
-Exit codes: 0 success, 1 failure, 2 unknown action, 3 recognized action not yet implemented.
+Exit codes: 0 success, 1 failure, 2 unknown action, 130 interrupted.
 """
 
 from __future__ import annotations
@@ -11,18 +11,20 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from process_compose_orchestrator.container import Container
 from process_compose_orchestrator.core.errors import ProcessComposeError
 from process_compose_orchestrator.core.patterns import ScopePattern
 from process_compose_orchestrator.core.scope import Scope
+from process_compose_orchestrator.core.timestamps import parse_rfc3339
+from process_compose_orchestrator.modules.logs.log_service import LogOptions
 from process_compose_orchestrator.modules.manifest.errors import ManifestError, ManifestNotFoundError
 from process_compose_orchestrator.modules.manifest.model import Service, ServiceManifest
 
 _KNOWN_ACTIONS = frozenset({"up", "down", "status", "restart", "logs", "describe", "catalog"})
 _UNKNOWN_EXIT = 2
-_REFUSE_EXIT = 3
 _DEFAULT_CONFIG_SUBDIR = Path(".winter") / "config" / "winter-service-process-compose"
 
 
@@ -150,7 +152,70 @@ def _cmd_status(container: Container, args: list[str]) -> int:
     return 0
 
 
-_ACTIONS = {"up": _cmd_up, "down": _cmd_down, "restart": _cmd_restart, "status": _cmd_status}
+def _write_stdout(text: str) -> None:
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def _parse_time_flag(flag: str, value: str) -> datetime:
+    parsed = parse_rfc3339(value)
+    if parsed is None:
+        raise ProcessComposeError(f"logs: {flag} expects an RFC3339 timestamp, got '{value}'")
+    return parsed
+
+
+def _parse_log_args(args: list[str]) -> tuple[list[ScopePattern], LogOptions]:
+    """Split ``<pattern...> [-f] [-n N|all] [--since T] [--until T] [-t]`` into patterns and options."""
+    patterns: list[ScopePattern] = []
+    follow = False
+    tail: int | None = None
+    since: datetime | None = None
+    until: datetime | None = None
+    it = iter(args)
+    for arg in it:
+        if arg in ("-f", "--follow"):
+            follow = True
+        elif arg in ("-t", "--timestamps"):
+            continue  # `ts` is always emitted; winter's -t decides whether to render it
+        elif arg in ("-n", "--tail", "--since", "--until"):
+            value = next(it, None)
+            if value is None:
+                raise ProcessComposeError(f"logs: {arg} requires a value")
+            if arg in ("-n", "--tail"):
+                if value != "all" and not value.isdigit():
+                    raise ProcessComposeError(f"logs: {arg} expects a count or 'all', got '{value}'")
+                tail = None if value == "all" else int(value)
+            elif arg == "--since":
+                since = _parse_time_flag(arg, value)
+            else:
+                until = _parse_time_flag(arg, value)
+        elif arg.startswith("-"):
+            raise ProcessComposeError(f"logs: unknown flag '{arg}'")
+        else:
+            patterns.append(ScopePattern.parse(arg))
+    return patterns, LogOptions(follow=follow, tail=tail, since=since, until=until)
+
+
+def _cmd_logs(container: Container, args: list[str]) -> int:
+    patterns, options = _parse_log_args(args)
+    scopes = list(dict.fromkeys(p.scope for p in patterns if p.scope_is_concrete))
+    if not scopes:
+        env = os.environ.get("WINTER_ENV")
+        if not env:
+            raise ProcessComposeError("logs: no concrete <env> in the patterns; name an env such as 'alpha/api'")
+        scopes = [env]
+    container.instance_lifecycle().require_binary()
+    workspace_dir = _require_workspace_dir()
+    manifest = _load_manifest(container, with_extensions=False)
+    service = container.log_service(_write_stdout)
+    for name in scopes:
+        scope = Scope.of(workspace_dir, name)
+        declared = tuple(svc.name for svc in _scope_services(scope, manifest))
+        service.run(scope, declared, patterns, options)
+    return 0
+
+
+_ACTIONS = {"up": _cmd_up, "logs": _cmd_logs, "down": _cmd_down, "restart": _cmd_restart, "status": _cmd_status}
 
 
 def main(argv: list[str]) -> int:
@@ -172,12 +237,13 @@ def main(argv: list[str]) -> int:
     if action == "catalog":
         return _cmd_catalog(container)
 
-    handler = _ACTIONS.get(action)
-    if handler is None:
-        print(f"process-compose-orchestrator: action '{action}' is not yet implemented", file=sys.stderr)
-        return _REFUSE_EXIT
+    handler = _ACTIONS[action]
     try:
         return handler(container, argv[1:])
+    except KeyboardInterrupt:
+        return 130
+    except BrokenPipeError:
+        return 0
     except (ProcessComposeError, ManifestError) as exc:
         print(f"process-compose-orchestrator: {action}: {exc}", file=sys.stderr)
         return 1

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from process_compose_orchestrator.core.errors import ProcessComposeErrorFactory
@@ -15,6 +16,8 @@ from process_compose_orchestrator.modules.instance.internal.stderr_notifier impo
 from process_compose_orchestrator.modules.instance.internal.system_clock import SystemClock
 from process_compose_orchestrator.modules.instance.lifecycle_service import InstanceLifecycleService
 from process_compose_orchestrator.modules.instance.socket_layout import SocketLayout
+from process_compose_orchestrator.modules.logs.internal.file_log_source import FileLogSource, WallFollowClock
+from process_compose_orchestrator.modules.logs.log_service import LogService
 from process_compose_orchestrator.modules.manifest.catalog_service import CatalogService
 from process_compose_orchestrator.modules.manifest.internal.toml_ext_manifest_reader import TomlExtManifestReader
 from process_compose_orchestrator.modules.manifest.internal.toml_manifest_reader import TomlManifestReader
@@ -57,3 +60,6 @@ class Container:
 
     def status_service(self) -> StatusService:
         return StatusService(self.instance_lifecycle(), self._notifier)
+
+    def log_service(self, write: Callable[[str], None]) -> LogService:
+        return LogService(FileLogSource(), WallFollowClock(), write)

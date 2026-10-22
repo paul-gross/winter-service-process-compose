@@ -184,3 +184,43 @@ class FakeStateStore:
 
     def socket_exists(self, socket: Path) -> bool:
         return socket.exists()
+
+
+# --- logs module fakes -----------------------------------------------------------------------------------------
+
+
+class FakeLogSource:
+    """Holds each file's text; ``poll`` mirrors the real adapter's offset and truncation semantics."""
+
+    def __init__(self, files: dict[Path, str] | None = None) -> None:
+        self.files: dict[Path, str] = dict(files or {})
+
+    def services(self, log_dir: Path) -> list[str]:
+        return sorted(p.stem for p in self.files if p.parent == log_dir)
+
+    def poll(self, path: Path, offset: int) -> tuple[list[str], int]:
+        text = self.files.get(path)
+        if text is None:
+            return [], 0
+        start = 0 if len(text) < offset else offset
+        end = text.rfind("\n")
+        if end < start:
+            return [], start
+        return text[start : end + 1].splitlines(), end + 1
+
+
+class FakeFollowClock:
+    """Runs ``on_sleep`` each time the loop idles and stops after ``max_sleeps`` idles."""
+
+    def __init__(self, max_sleeps: int = 3, on_sleep=None) -> None:
+        self.max_sleeps = max_sleeps
+        self.sleeps = 0
+        self.on_sleep = on_sleep
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps += 1
+        if self.on_sleep is not None:
+            self.on_sleep(self.sleeps)
+
+    def keep_following(self) -> bool:
+        return self.sleeps <= self.max_sleeps
