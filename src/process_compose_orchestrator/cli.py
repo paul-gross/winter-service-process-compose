@@ -14,7 +14,11 @@ import sys
 from pathlib import Path
 
 from process_compose_orchestrator.container import Container
+from process_compose_orchestrator.core.errors import ProcessComposeError
+from process_compose_orchestrator.core.patterns import ScopePattern
+from process_compose_orchestrator.core.scope import Scope
 from process_compose_orchestrator.modules.manifest.errors import ManifestError, ManifestNotFoundError
+from process_compose_orchestrator.modules.manifest.model import Service, ServiceManifest
 
 _KNOWN_ACTIONS = frozenset({"up", "down", "status", "restart", "logs", "describe", "catalog"})
 _UNKNOWN_EXIT = 2
@@ -60,6 +64,95 @@ def _cmd_catalog(container: Container) -> int:
     return _emit_services(names)
 
 
+def _require_workspace_dir() -> Path:
+    ws_dir = os.environ.get("WINTER_WORKSPACE_DIR")
+    if not ws_dir:
+        raise ProcessComposeError("WINTER_WORKSPACE_DIR is not set")
+    return Path(ws_dir)
+
+
+def _load_manifest(container: Container, *, with_extensions: bool) -> ServiceManifest:
+    config_dir = resolve_config_dir()
+    if config_dir is None:
+        raise ProcessComposeError("no config directory (WINTER_WORKSPACE_DIR unset)")
+    ext_path = os.environ.get("WINTER_SERVICE_MANIFEST") if with_extensions else None
+    loaded = container.manifest_loader().load(config_dir, Path(ext_path) if ext_path else None)
+    for note in loaded.notes:
+        container.notifier().note(note)
+    return loaded.manifest
+
+
+def _scope_services(scope: Scope, manifest: ServiceManifest) -> tuple[Service, ...]:
+    return manifest.workspace_services if scope.is_workspace else manifest.services
+
+
+def _single_scope_pattern(action: str, args: list[str]) -> ScopePattern:
+    if len(args) != 1:
+        raise ProcessComposeError(f"{action}: expected exactly one <scope>[/<service>] argument, got {len(args)}")
+    pattern = ScopePattern.parse(args[0])
+    if not pattern.scope_is_concrete:
+        raise ProcessComposeError(f"{action}: scope '{pattern.scope}' must be a concrete env name")
+    return pattern
+
+
+def _cmd_up(container: Container, args: list[str]) -> int:
+    pattern = _single_scope_pattern("up", args)
+    scope = Scope.of(_require_workspace_dir(), pattern.scope)
+    manifest = _load_manifest(container, with_extensions=True)
+    raw_timeout = os.environ.get("WINTER_SERVICE_TIMEOUT")
+    container.instance_lifecycle().up(
+        scope,
+        _scope_services(scope, manifest),
+        pattern,
+        os.environ,
+        float(raw_timeout) if raw_timeout else None,
+    )
+    return 0
+
+
+def _cmd_down(container: Container, args: list[str]) -> int:
+    pattern = _single_scope_pattern("down", args)
+    scope = Scope.of(_require_workspace_dir(), pattern.scope)
+    container.instance_lifecycle().down(scope, pattern)
+    return 0
+
+
+def _cmd_restart(container: Container, args: list[str]) -> int:
+    if not args:
+        raise ProcessComposeError("restart: at least one <env>/<service> pattern is required")
+    by_scope: dict[str, list[str]] = {}
+    for token in args:
+        pattern = ScopePattern.parse(token)
+        if not pattern.scope_is_concrete:
+            raise ProcessComposeError(f"restart: scope '{pattern.scope}' must be a concrete env name")
+        by_scope.setdefault(pattern.scope, []).append(pattern.service)
+    workspace_dir = _require_workspace_dir()
+    lifecycle = container.instance_lifecycle()
+    for name, globs in by_scope.items():
+        lifecycle.restart(Scope.of(workspace_dir, name), globs)
+    return 0
+
+
+def _cmd_status(container: Container, args: list[str]) -> int:
+    patterns = [ScopePattern.parse(a) for a in args]
+    env = os.environ.get("WINTER_ENV")
+    names = [env] if env else list(dict.fromkeys(p.scope for p in patterns if p.scope_is_concrete))
+    envs: list[dict[str, object]] = []
+    if names:
+        workspace_dir = _require_workspace_dir()
+        manifest = _load_manifest(container, with_extensions=False)
+        status = container.status_service()
+        for name in names:
+            scope = Scope.of(workspace_dir, name)
+            envs.extend(status.document(scope, _scope_services(scope, manifest), patterns, os.environ)["envs"])
+    sys.stdout.write(json.dumps({"envs": envs}) + "\n")
+    sys.stdout.flush()
+    return 0
+
+
+_ACTIONS = {"up": _cmd_up, "down": _cmd_down, "restart": _cmd_restart, "status": _cmd_status}
+
+
 def main(argv: list[str]) -> int:
     """Dispatch ``[action, *rest]``; *argv* is ``sys.argv[1:]``."""
     # Echo argv to stderr so the forwards-params conformance check in `winter ext verify` passes.
@@ -79,8 +172,15 @@ def main(argv: list[str]) -> int:
     if action == "catalog":
         return _cmd_catalog(container)
 
-    print(f"process-compose-orchestrator: action '{action}' is not yet implemented", file=sys.stderr)
-    return _REFUSE_EXIT
+    handler = _ACTIONS.get(action)
+    if handler is None:
+        print(f"process-compose-orchestrator: action '{action}' is not yet implemented", file=sys.stderr)
+        return _REFUSE_EXIT
+    try:
+        return handler(container, argv[1:])
+    except (ProcessComposeError, ManifestError) as exc:
+        print(f"process-compose-orchestrator: {action}: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

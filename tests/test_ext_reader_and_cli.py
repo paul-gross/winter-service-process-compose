@@ -48,10 +48,9 @@ def test_describe_and_catalog_emit_services(
         assert json.loads(out) == {"services": ["workspace/fx", "*/api"]}
 
 
-def test_unimplemented_actions_exit_3_and_unknown_exits_2(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_logs_not_yet_implemented_exits_3_and_unknown_exits_2(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WINTER_EXT_CONFIG_DIR", raising=False)
-    for action in ("up", "down", "status", "restart", "logs"):
-        assert cli.main([action]) == 3
+    assert cli.main(["logs"]) == 3
     assert cli.main(["bogus"]) == 2
     assert cli.main([]) == 2
 
