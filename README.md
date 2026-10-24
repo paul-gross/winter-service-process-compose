@@ -19,3 +19,8 @@ full application stack side by side.
 Install `process-compose` (1.122.0 or newer), copy [workflow/config.toml.example](./workflow/config.toml.example) to
 `.winter/config/winter-service-process-compose/config.toml`, and bind the provider in `[capabilities]`. See the
 [context hub](./context/index.md) for the schema and behavior.
+
+## License
+
+Source-available under the Functional Source License 1.1 (FSL-1.1-ALv2). Each release converts to Apache License 2.0 two
+years after it ships. See LICENSE.
