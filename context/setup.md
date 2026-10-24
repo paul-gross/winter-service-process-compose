@@ -1,6 +1,6 @@
 # Setup
 
-1. Install [process-compose](https://github.com/F1bonacci/process-compose) **1.122.0 or newer** — the version whose flag
+1. Install [process-compose](https://github.com/F1bonacc1/process-compose) **1.122.0 or newer** — the version whose flag
    set this provider is built on. `winter doctor` fails with install guidance when the binary is missing or older.
 2. Copy [workflow/config.toml.example](../workflow/config.toml.example) to
    `workspace:/.winter/config/winter-service-process-compose/config.toml` and declare the services. Services already

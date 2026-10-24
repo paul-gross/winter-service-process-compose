@@ -1,7 +1,7 @@
 # ❄️ winter-service-process-compose
 
 A [winter](https://github.com/paul-gross/winter) extension that adds
-[process-compose](https://github.com/F1bonacci/process-compose) service orchestration to a workspace. Each scope — a
+[process-compose](https://github.com/F1bonacc1/process-compose) service orchestration to a workspace. Each scope — a
 feature environment or the workspace — gets its own headless process-compose daemon, so several environments run the
 full application stack side by side.
 
