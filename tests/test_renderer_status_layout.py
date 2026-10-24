@@ -66,6 +66,12 @@ def test_renderer_health_mapping_and_interpolation() -> None:
     assert out["c"]["readiness_probe"]["exec"] == {"command": "test -f /tmp/f"}
 
 
+def test_renderer_probe_tolerates_a_slow_start() -> None:
+    svc = Service(name="u", cmd="x", health=Health(HealthType.URL, "http://localhost:4251/"))
+    probe = _render(svc)["u"]["readiness_probe"]
+    assert probe["period_seconds"] * probe["failure_threshold"] >= 120
+
+
 def test_renderer_unset_health_variable_is_an_error() -> None:
     svc = Service(name="u", cmd="x", health=Health(HealthType.URL, "http://localhost:${P}/"))
     with pytest.raises(ProcessComposeError, match="unset variable"):

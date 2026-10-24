@@ -26,6 +26,10 @@ from process_compose_orchestrator.modules.manifest.model import (
 _VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _CONFIG_VERSION = "0.5"
 _DEFAULT_HTTP_PORT = {"http": 80, "https": 443}
+# process-compose terminates a process once its readiness probe fails this many times in a row, and its own default
+# of 3 kills anything that takes longer than ~2s to start listening. Matching the provider's default `up` deadline at
+# one probe a second lets a slow starter keep running for as long as `up` would wait on it.
+_READINESS_FAILURE_THRESHOLD = 120
 
 
 class ConfigRenderer:
@@ -99,7 +103,7 @@ class ConfigRenderer:
 
     def _probe(self, svc: Service, health: Health, environ: Mapping[str, str]) -> dict[str, Any]:
         target = self._interpolate(svc.name, health.target, environ)
-        probe: dict[str, Any] = {"period_seconds": 1}
+        probe: dict[str, Any] = {"period_seconds": 1, "failure_threshold": _READINESS_FAILURE_THRESHOLD}
         if health.timeout is not None:
             probe["timeout_seconds"] = _whole_or_float(health.timeout)
         if health.type is HealthType.URL:
