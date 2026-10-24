@@ -44,7 +44,7 @@ def test_fresh_up_launches_disabled_then_enables_through_update(tmp_path: Path) 
     rig = Rig(tmp_path)
     rig.up()
     assert all(p.get("disabled") for p in rig.client.launched_configs[0]["processes"].values())
-    assert not any(p.get("disabled") for p in rig.client.updated_configs[0]["processes"].values())
+    assert not any(p.get("disabled") for p in rig.client.updated_configs[-1]["processes"].values())
     assert rig.store.states["e1"] == InstanceState(sid=4242, socket=str(rig.socket))
 
 
@@ -80,8 +80,21 @@ def test_stale_recovery_refuses_when_daemon_pid_is_alive(tmp_path: Path) -> None
 def test_partial_up_starts_matched_service_and_its_dependencies_only(tmp_path: Path) -> None:
     rig = Rig(tmp_path)
     rig.up(ScopePattern.parse("e1/api"))
-    enabled = {n for n, p in rig.client.updated_configs[0]["processes"].items() if not p.get("disabled")}
+    enabled = {n for n, p in rig.client.updated_configs[-1]["processes"].items() if not p.get("disabled")}
     assert enabled == {"api", "db"}
+
+
+def test_fresh_up_enables_each_dependency_before_its_dependents(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    rig.up()
+    waves = [{n for n, p in c["processes"].items() if not p.get("disabled")} for c in rig.client.updated_configs]
+    assert waves == [{"db", "worker"}, {"db", "worker", "api"}]
+
+
+def test_up_refuses_a_depends_on_cycle(tmp_path: Path) -> None:
+    cyclic = (Service(name="a", cmd="x", depends_on=("b",)), Service(name="b", cmd="x", depends_on=("a",)))
+    with pytest.raises(ProcessComposeError, match="cycle"):
+        Rig(tmp_path).up(services=cyclic)
 
 
 def test_partial_up_on_live_keeps_running_services_enabled(tmp_path: Path) -> None:

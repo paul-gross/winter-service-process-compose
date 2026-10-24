@@ -167,8 +167,7 @@ class InstanceLifecycleService:
             self._notifier.note(f"could not record the daemon session for scope '{scope.name}'; crash recovery limited")
         else:
             self._store.write(scope, InstanceState(sid=sid, socket=str(socket)))
-        self._write_config(scope, services, selected, environ)
-        self._client.update(socket, scope.config_path)
+        self._enable_in_waves(scope, services, set(), selected, environ, socket)
 
     def _update_live(
         self,
@@ -179,12 +178,54 @@ class InstanceLifecycleService:
         view: InstanceView,
     ) -> None:
         running = {p.name for p in view.processes if p.status not in TERMINAL_STATUSES}
-        self._write_config(scope, services, selected | running, environ)
-        self._client.update(view.socket, scope.config_path)
-        refreshed = self._client.list_processes(view.socket) or []
-        for proc in refreshed:
-            if proc.name in selected and proc.status in TERMINAL_STATUSES:
-                self._client.start_process(view.socket, proc.name)
+        self._enable_in_waves(scope, services, running, selected - running, environ, view.socket)
+        refreshed = {p.name: p.status for p in self._client.list_processes(view.socket) or []}
+        for wave in self._waves(services, selected):
+            for name in sorted(wave):
+                if refreshed.get(name) in TERMINAL_STATUSES:
+                    self._client.start_process(view.socket, name)
+
+    def _enable_in_waves(
+        self,
+        scope: Scope,
+        services: tuple[Service, ...],
+        enabled: set[str],
+        to_enable: set[str],
+        environ: Mapping[str, str],
+        socket: Path,
+    ) -> None:
+        # A process started by `project update` looks up each dependency among the processes already registered and,
+        # finding none, starts at once instead of waiting. One update enables its processes in map order, so a
+        # dependent can register before its dependency. Enabling one dependency level per update registers every
+        # dependency before anything that waits on it. An update with nothing newly enabled still runs, so an
+        # `up` re-applies a changed definition.
+        waves = self._waves(services, to_enable) or [set()]
+        for wave in waves:
+            enabled = enabled | wave
+            self._write_config(scope, services, enabled, environ)
+            self._client.update(socket, scope.config_path)
+
+    @staticmethod
+    def _waves(services: tuple[Service, ...], names: set[str]) -> list[set[str]]:
+        """*names* grouped by dependency depth within *names*: each wave depends only on earlier waves."""
+        by_name = {svc.name: svc for svc in services}
+        depth: dict[str, int] = {}
+
+        def visit(name: str, trail: frozenset[str]) -> int:
+            if name in depth:
+                return depth[name]
+            if name in trail:
+                raise ProcessComposeError(f"service '{name}' is part of a depends_on cycle")
+            deps = [d for d in by_name[name].depends_on if d in names]
+            depth[name] = 1 + max((visit(d, trail | {name}) for d in deps), default=-1)
+            return depth[name]
+
+        for name in names:
+            visit(name, frozenset())
+        waves: list[set[str]] = [set() for _ in range(max(depth.values(), default=-1) + 1)]
+        for name, level in depth.items():
+            waves[level].add(name)
+        return waves
 
     def _write_config(
         self, scope: Scope, services: tuple[Service, ...], enabled: set[str], environ: Mapping[str, str]
