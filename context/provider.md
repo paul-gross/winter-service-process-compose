@@ -14,6 +14,10 @@ scope root is `<ws>/<env>` for a feature env and `<ws>` for the workspace scope:
 | `lock`           | Per-scope advisory lock taken by `up`, `down`, and `restart`          |
 | `logs/<svc>.log` | One JSON-lines log per service                                        |
 
+The workspace scope's directory is machine-local state. `winter-ext.toml` declares it under `[excludes]`, so
+`winter ws init` adds it to the workspace's `.git/info/exclude` and adopters have nothing to ignore by hand. A feature
+env's directory sits inside the env directory, which winter already excludes.
+
 A unix socket path is limited to 108 bytes. When `pc.sock` would exceed 107, the socket moves to
 `${XDG_RUNTIME_DIR:-/tmp}/winter-pc-<uid>/<sha256 of the scope root, first 16 hex>.sock` (directory mode 0700). The
 fallback is derived from the scope alone, so every action finds it again without reading state.

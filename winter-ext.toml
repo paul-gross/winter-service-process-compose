@@ -15,5 +15,11 @@ service = "workflow/service"
 [implements]
 service = "v1"
 
+# The workspace scope keeps its runtime state (socket, lock, logs) under the workspace root's
+# `.winter/process-compose/`. It is machine-local, so winter writes it into the workspace's git
+# exclude file. A feature env's state sits inside the env directory, which winter already excludes.
+[excludes]
+paths = ["/.winter/process-compose/"]
+
 [hooks]
 on_env_destroy = "./hooks/destroy-worktree.sh"
