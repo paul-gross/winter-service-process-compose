@@ -26,7 +26,14 @@ class IInstanceStateStore(Protocol):
     def clear(self, scope: Scope) -> None: ...
 
     def lock(self, scope: Scope) -> AbstractContextManager[None]:
-        """Hold the scope's exclusive advisory lock for the duration of the ``with`` block."""
+        """Hold the scope's exclusive advisory lock for the duration of the ``with`` block.
+
+        Raises ``ProcessComposeError`` when the scope's root does not exist; the lock never creates it.
+        """
+        ...
+
+    def scope_root_exists(self, scope: Scope) -> bool:
+        """Whether the scope's root directory is on disk; the workspace scope's root is the workspace itself."""
         ...
 
     def remove_socket(self, socket: Path) -> None: ...

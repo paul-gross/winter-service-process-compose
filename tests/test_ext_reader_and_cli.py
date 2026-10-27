@@ -73,3 +73,19 @@ def test_describe_with_invalid_manifest_fails(tmp_path: Path, monkeypatch: pytes
     (tmp_path / "config.toml").write_text('[[service]]\nname = "a"\ncmd = ""\n', encoding="utf-8")
     monkeypatch.setenv("WINTER_EXT_CONFIG_DIR", str(tmp_path))
     assert cli.main(["describe"]) == 1
+
+
+def test_down_and_up_of_a_missing_env_create_no_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = tmp_path / "config"
+    config.mkdir()
+    _config(config, monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.setenv("WINTER_WORKSPACE_DIR", str(workspace))
+    assert cli.main(["down", "__winter_verify/probe__"]) == 0
+    assert "has no running instance" in capsys.readouterr().err
+    assert cli.main(["up", "nosuchenv"]) == 1
+    assert "env directory" in capsys.readouterr().err
+    assert list(workspace.iterdir()) == []

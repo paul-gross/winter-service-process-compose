@@ -6,6 +6,7 @@ import fnmatch
 import json
 import os
 from collections.abc import Mapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -88,6 +89,8 @@ class InstanceLifecycleService:
         timeout: float | None = None,
     ) -> None:
         """Start the matched services (all of them for a whole-scope pattern), then wait on declared health."""
+        if not self._store.scope_root_exists(scope):
+            raise ProcessComposeError(f"scope '{scope.name}': env directory {scope.root} does not exist")
         if not services:
             self._notifier.note(f"scope '{scope.name}' declares no services; nothing to start")
             return
@@ -111,7 +114,11 @@ class InstanceLifecycleService:
     def down(self, scope: Scope, pattern: ScopePattern) -> None:
         """Stop the whole scope, or only the matched processes, leaving the daemon up for a partial pattern."""
         socket = self._layout.socket_path(scope)
-        with self._store.lock(scope):
+        rooted = self._store.scope_root_exists(scope)
+        if not rooted and not self._store.socket_exists(socket):
+            self._notifier.note(f"scope '{scope.name}' has no running instance")
+            return
+        with self._exclusive(scope, rooted):
             state = self._store.read(scope)
             if not self._store.socket_exists(socket) and state is None:
                 self._notifier.note(f"scope '{scope.name}' has no running instance")
@@ -137,17 +144,29 @@ class InstanceLifecycleService:
     def restart(self, scope: Scope, service_globs: list[str]) -> None:
         """Restart the live processes matching *service_globs*; a scope with no live daemon is an error."""
         self.require_binary()
-        with self._store.lock(scope):
+        rooted = self._store.scope_root_exists(scope)
+        if not rooted and not self._store.socket_exists(self._layout.socket_path(scope)):
+            raise self._nothing_to_restart(scope)
+        with self._exclusive(scope, rooted):
             view = self.inspect(scope)
             if view.kind is not InstanceKind.LIVE:
-                raise ProcessComposeError(
-                    f"scope '{scope.name}' has no running instance to restart; run `winter service up {scope.name}`"
-                )
+                raise self._nothing_to_restart(scope)
             names = [p.name for p in view.processes if any(fnmatch.fnmatchcase(p.name, g) for g in service_globs)]
             if not names:
                 raise ProcessComposeError(f"no service in scope '{scope.name}' matches {', '.join(service_globs)}")
             for name in names:
                 self._client.restart_process(view.socket, name)
+
+    def _exclusive(self, scope: Scope, rooted: bool) -> AbstractContextManager[None]:
+        """The scope's lock, or none for an instance outliving its root: the lock lives under the root and a missing
+        root is never recreated, so a daemon on the root-independent fallback socket is acted on unlocked."""
+        return self._store.lock(scope) if rooted else nullcontext()
+
+    @staticmethod
+    def _nothing_to_restart(scope: Scope) -> ProcessComposeError:
+        return ProcessComposeError(
+            f"scope '{scope.name}' has no running instance to restart; run `winter service up {scope.name}`"
+        )
 
     def _fresh_start(
         self,

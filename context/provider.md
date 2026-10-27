@@ -28,6 +28,15 @@ every process sets `flush_each_line` and `add_timestamp` so its log file is curr
 
 ## Lifecycle
 
+A feature-env name whose `<ws>/<env>/` directory does not exist is a scope that does not exist, and no action creates
+anything for it: `status` reports nothing running, `logs` finds no files and emits nothing, and `up` exits non-zero
+naming the missing directory. `down` and `restart` first look for a daemon still answering on the scope's socket: with
+none, `down` notes that there is no running instance and exits 0, and `restart` fails as it does for a stopped scope.
+The fallback socket derives from the scope path alone, so a daemon can outlive its env directory (an `rm -rf` while it
+ran, an interrupted destroy); `down` and `restart` act on it without taking the lock, which lives under the missing
+root, and create nothing there. Only the state directory beneath an existing scope root is created on demand, and the
+lock refuses a root that vanishes underneath it with an error naming the directory.
+
 - **`up`, no instance**: launches the daemon with every process disabled, then enables them in one update. The first
   update after a launch restarts every process even with identical config, so enabling at that point avoids a later
   spurious restart.

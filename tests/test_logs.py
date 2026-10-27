@@ -185,3 +185,13 @@ def test_logs_without_binary_names_the_binary(
     monkeypatch.setenv("WINTER_WORKSPACE_DIR", "/ws")
     assert main(["logs", "alpha/api", "-n", "5"]) == 1
     assert "process-compose" in capsys.readouterr().err
+
+
+def test_logs_of_a_missing_env_emit_nothing_and_create_nothing(tmp_path: Path) -> None:
+    out: list[str] = []
+    ghost = Scope.of(tmp_path, "ghost")
+    LogService(FileLogSource(), FakeFollowClock(), out.append).run(
+        ghost, ("api",), [ScopePattern.parse("ghost/api")], LogOptions()
+    )
+    assert out == []
+    assert list(tmp_path.iterdir()) == []

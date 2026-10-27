@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
+from process_compose_orchestrator.core.errors import ProcessComposeError
 from process_compose_orchestrator.core.scope import Scope
 from process_compose_orchestrator.modules.instance.instance_state import IInstanceStateStore, InstanceState
 
@@ -35,7 +36,14 @@ class FileInstanceStateStore:
 
     @contextmanager
     def _locked(self, scope: Scope) -> Iterator[None]:
-        scope.state_dir.mkdir(parents=True, exist_ok=True)
+        # The state directory is created on demand, but never the scope root above it: a missing root is a scope that
+        # does not exist, and conjuring it would leave a stray directory behind. Each level is made without
+        # `parents=True`, so a root that vanishes at any point surfaces here rather than being recreated.
+        try:
+            scope.state_dir.parent.mkdir(exist_ok=True)
+            scope.state_dir.mkdir(exist_ok=True)
+        except FileNotFoundError:
+            raise ProcessComposeError(f"scope '{scope.name}': env directory {scope.root} does not exist") from None
         with scope.lock_path.open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             try:
@@ -45,6 +53,9 @@ class FileInstanceStateStore:
 
     def remove_socket(self, socket: Path) -> None:
         socket.unlink(missing_ok=True)
+
+    def scope_root_exists(self, scope: Scope) -> bool:
+        return scope.root.is_dir()
 
     def socket_exists(self, socket: Path) -> bool:
         return socket.exists()

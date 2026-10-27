@@ -41,6 +41,7 @@ class FakeExtManifestReader:
 
 from contextlib import contextmanager  # noqa: E402
 
+from process_compose_orchestrator.core.errors import ProcessComposeError  # noqa: E402
 from process_compose_orchestrator.core.scope import Scope  # noqa: E402
 from process_compose_orchestrator.modules.instance.instance_state import InstanceState  # noqa: E402
 from process_compose_orchestrator.modules.instance.process_compose_client import ProcessInfo  # noqa: E402
@@ -160,8 +161,12 @@ class FakeReaper:
 
 
 class FakeStateStore:
+    """Persisted state per scope name; ``missing_roots`` names the scopes whose root directory is gone."""
+
     def __init__(self) -> None:
         self.states: dict[str, InstanceState] = {}
+        self.missing_roots: set[str] = set()
+        self.locked: list[str] = []
 
     def read(self, scope: Scope) -> InstanceState | None:
         return self.states.get(scope.name)
@@ -173,11 +178,17 @@ class FakeStateStore:
         self.states.pop(scope.name, None)
 
     @contextmanager
-    def _held(self) -> Iterator[None]:
+    def _held(self, scope: Scope) -> Iterator[None]:
+        if scope.name in self.missing_roots:
+            raise ProcessComposeError(f"scope '{scope.name}': env directory {scope.root} does not exist")
+        self.locked.append(scope.name)
         yield
 
     def lock(self, scope: Scope):
-        return self._held()
+        return self._held(scope)
+
+    def scope_root_exists(self, scope: Scope) -> bool:
+        return scope.name not in self.missing_roots
 
     def remove_socket(self, socket: Path) -> None:
         socket.unlink(missing_ok=True)
